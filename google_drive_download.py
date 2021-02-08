@@ -13,6 +13,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = ['https://www.googleapis.com/auth/drive']
+RESUME = False
 
 def load_service():
     creds = None
@@ -37,6 +38,14 @@ def load_service():
     return service
 
 def export_file(service, file_id, file_name, folder_path, mimeType, ext):
+    global RESUME
+    file_name = file_name.replace("/",u"\u2215")
+    file_name = file_name + ext
+    file_name = os.path.join(folder_path, file_name)
+    if RESUME == True:
+        if os.path.exists(file_name):
+            print(f"Skipping export: {file_name}")
+            return
     request = service.files().export(fileId=file_id, mimeType=mimeType)
     fh = BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
@@ -44,14 +53,17 @@ def export_file(service, file_id, file_name, folder_path, mimeType, ext):
     while done is False:
         status, done = downloader.next_chunk()
         # print("Download %d%%." % int(status.progress() * 100))
-    file_name = file_name.replace("/",u"\u2215")
-    file_name = file_name + ext
-    file_name = os.path.join(folder_path, file_name)
     f = open(file_name, 'wb')
     f.write(fh.getvalue())
 
 
 def download_file(service, file_id, file_name, folder_path):
+    global RESUME
+    file_name = os.path.join(folder_path, file_name)
+    if RESUME == True:
+        if os.path.exists(file_name):
+            print(f"Skipping download: {file_name}")
+            return
     request = service.files().get_media(fileId=file_id)
     fh = BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
@@ -59,26 +71,30 @@ def download_file(service, file_id, file_name, folder_path):
     while done is False:
         status, done = downloader.next_chunk()
         # print("Download %d%%." % int(status.progress() * 100))
-    file_name = os.path.join(folder_path, file_name)
     f = open(file_name, 'wb')
     f.write(fh.getvalue())
     # print("download complete")
 
 def recurse_folder(service, folder_id, folder_path):
+    global RESUME
     # """
     # Call the Drive v3 API
     # query params reference: https://developers.google.com/drive/api/v3/ref-search-terms#file_properties https://developers.google.com/drive/api/v2/ref-search-terms
     page_token = None
     while True:
+        items = None
         # https://developers.google.com/drive/api/v3/reference/files/list
-        results = service.files().list(
-                                        q=f"parents in '{folder_id}'",
-                                        pageSize=10, 
-                                        fields="nextPageToken, files(id, name, mimeType)",
-                                        pageToken=page_token
-                                      ).execute()
-        items = results.get('files', [])
-
+        try:
+            results = service.files().list(
+                                            q=f"parents in '{folder_id}'",
+                                            pageSize=10, 
+                                            fields="nextPageToken, files(id, name, mimeType)",
+                                            pageToken=page_token
+                                        ).execute()
+            items = results.get('files', [])
+        except:
+            print(f"ERROR PULLING FOLDER: {folder_path}")
+            continue
         if not items:
             print(f'No files found for folder: {folder_id}.')
         else:
@@ -106,34 +122,48 @@ def recurse_folder(service, folder_id, folder_path):
                     elif item['mimeType'] == "application/vnd.google-apps.drawing":
                         mimeType = "image/png"
                         ext = ".png"
+                    elif item['mimeType'] == "application/vnd.google-apps.form":
+                        break
+                    elif item['mimeType'] == "application/vnd.google-apps.shortcut":
+                        break
                     else:
                         mimeType = "application/pdf"
                         ext = ".pdf"
                     export_file(service, item["id"], item["name"], folder_path, mimeType, ext)
                 else:
                     download_file(service, item["id"], item["name"], folder_path)
+                
         page_token = results.get('nextPageToken', None)
         if page_token is None:
             break
 
 def main():
+    global RESUME
     try:
         folder_id = sys.argv[1]
     except IndexError:    
         print('\033[91m' + 'missing arguement folder_id!' + '\033[0m')
         exit()
+    try:
+        RESUME = bool(sys.argv[2])
+    except IndexError:
+        RESUME = False
+    print(f"Resume Mode: {RESUME}")
     #delete anything existing and start fresh each time
-    if os.path.exists('download'):
-        rmtree('download')
-    if not os.path.exists('download'):
-        os.makedirs('download')
-    root_folder = os.getcwd() + "/download"
+    folder_name = "download_6"
+    if RESUME == False:
+        if os.path.exists(folder_name):
+            rmtree(folder_name)
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+    root_folder = os.getcwd() + "/" + folder_name
     service = load_service()
     recurse_folder(service, folder_id, root_folder)
     print("download complete -> making zip file")
     make_archive("download", "zip", root_folder)
-    if os.path.exists('download'):
-        rmtree('download')
+    if RESUME == False:
+        if os.path.exists(folder_name):
+            rmtree(folder_name)
     print(f"Your zipfile can be found at: {'download.zip'}")
 
 if __name__ == '__main__':

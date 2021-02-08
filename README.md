@@ -15,6 +15,9 @@ You can create one here: https://developers.google.com/drive/api/v3/quickstart/p
 Takes one arguement which is the folder id to download
 ```
 python3 google_drive_download.py 1zphL8v1MJ3m4JLXjUgM_ZbUdkXAIDNRM
+
+
+python3 google_drive_download.py 1zphL8v1MJ3m4JLXjUgM_ZbUdkXAIDNRM True
 ```
 
 
